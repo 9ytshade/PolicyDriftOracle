@@ -207,12 +207,12 @@ class PolicyDriftOracle(gl.Contract):
         critical_clauses: str,
         check_interval_sec: u64,
     ) -> u256:
-        clean_title = title.strip()
-        clean_category = category.strip()
-        clean_url = url.strip()
-        clean_hash = baseline_hash.strip()
-        clean_summary = baseline_summary.strip()
-        clean_clauses = critical_clauses.strip()
+        clean_title = str(title).strip()
+        clean_category = str(category).strip()
+        clean_url = str(url).strip()
+        clean_hash = hex(baseline_hash) if isinstance(baseline_hash, int) else str(baseline_hash).strip()
+        clean_summary = str(baseline_summary).strip()
+        clean_clauses = str(critical_clauses).strip()
 
         if not (self.MIN_TITLE_LENGTH <= len(clean_title) <= self.MAX_TITLE_LENGTH):
             raise gl.vm.UserError("Title length out of bounds")
@@ -445,9 +445,9 @@ Respond with ONLY valid JSON with keys "verdict", "severity", "affected_clauses"
         if gl.message.sender_address != policy.owner:
             raise gl.vm.UserError("Only policy owner can update baseline")
 
-        clean_hash = new_baseline_hash.strip()
-        clean_summary = new_baseline_summary.strip()
-        clean_clauses = new_critical_clauses.strip()
+        clean_hash = hex(new_baseline_hash) if isinstance(new_baseline_hash, int) else str(new_baseline_hash).strip()
+        clean_summary = str(new_baseline_summary).strip()
+        clean_clauses = str(new_critical_clauses).strip()
 
         if not (1 <= len(clean_hash) <= self.MAX_HASH_LENGTH):
             raise gl.vm.UserError("New baseline hash length out of bounds")
