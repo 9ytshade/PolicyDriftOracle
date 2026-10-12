@@ -4,10 +4,11 @@
 >
 > A standalone GenLayer Intelligent Contract that continuously tracks off-chain operational documents, terms of service, SLAs, and privacy commitments, using decentralized validator consensus to detect unauthorized modifications and fail-closed against downstream protocol risks.
 
-[![GenLayer Studionet](https://img.shields.io/badge/GenLayer-Studionet-blue)](https://explorer-studio.genlayer.com/address/0x123D9c10743eA27da684e3606C5a232848C948D5)
+[![GenLayer Studionet](https://img.shields.io/badge/GenLayer-Studionet-blue)](https://explorer-studio.genlayer.com/address/0x8C2C70F47147274F1694A6E8Ad9066121B082c45)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests: Direct Mode](https://img.shields.io/badge/Direct_Mode_Tests-14%2F14_PASS-brightgreen)](#)
+[![Tests: Direct Mode](https://img.shields.io/badge/Direct_Mode_Tests-16%2F16_PASS-brightgreen)](#)
 [![Tests: Studionet](https://img.shields.io/badge/Studionet_Integration-5%2F5_PASS-brightgreen)](#)
+[![Preflight Linter](https://img.shields.io/badge/Preflight-20%2F20_PASS-brightgreen)](#)
 
 ---
 
@@ -26,6 +27,15 @@ Traditional oracles (e.g. Chainlink) can only fetch raw JSON numbers or fixed st
 
 `PolicyDriftOracle` uses GenLayer validators to fetch live web documents and achieve equivalence consensus on semantic drift, creating tamper-proof on-chain audit receipts.
 
+### Equivalence Principle & Discrete Canonical Buckets (v1.0.1 Fix)
+In v1.0.1, the contract binds validator consensus to exact canonical severity buckets:
+- `STABLE` (`0`): Baseline obligations intact.
+- `MINOR_COMPATIBLE` (`2`): Formatting, clarification, non-breaking administrative updates.
+- `MATERIAL_BREAKING` (`7`): Core obligations weakened, rate limits slashed, refund credits omitted.
+- `UNAVAILABLE` (`10`): Document gone (404/410), server outage (5xx/429), or empty content.
+
+Validators must agree with zero tolerance on severity, ensuring that accepted validator proposals cannot cross downstream decision boundaries (`is_allowed`).
+
 ---
 
 ## 2. Architecture & Flow
@@ -41,15 +51,16 @@ Traditional oracles (e.g. Chainlink) can only fetch raw JSON numbers or fixed st
 +---------------------------------------------------------------------------------+
 |                            PolicyDriftOracle (GenVM)                            |
 |                                                                                 |
-|  [Deterministic Gate]                                                           |
+|  [Deterministic Gate: is_allowed]                                               |
 |  - Verifies policy is active                                                    |
 |  - Verifies audit matches current spec_version                                  |
-|  - Rejects if status == "DRIFT_DETECTED" or severity > max_allowed              |
+|  - Rejects if status == "DRIFTED" or severity > max_allowed                     |
 |                                                                                 |
 |  [Non-Deterministic Consensus Audit: check_drift]                              |
 |  - Leader fetches live web document (HTTPS)                                     |
 |  - Validators execute equivalence prompt comparing baseline against live prose  |
-|  - Quorum reaches MAJORITY_AGREE on structured verdict & severity score         |
+|  - Strict Equivalence Principle validation: exact verdict & canonical severity  |
+|  - Quorum reaches MAJORITY_AGREE on structured verdict & canonical severity     |
 +---------------------------------------------------------------------------------+
 ```
 
@@ -57,12 +68,11 @@ Traditional oracles (e.g. Chainlink) can only fetch raw JSON numbers or fixed st
 
 ## 3. Canonical Studionet Deployment
 
-- **Contract Address**: [`0x123D9c10743eA27da684e3606C5a232848C948D5`](https://explorer-studio.genlayer.com/address/0x123D9c10743eA27da684e3606C5a232848C948D5)
-- **Deployer**: `0xb704b624ae5f776b3a3fa7496adcda4db4dcab56`
-- **Deployment Transaction**: `0xe8346c0749da0200398542b7e3aaeb08a2e8f4fb4a95993c070f584bfb03beab`
+- **Contract Address**: [`0x8C2C70F47147274F1694A6E8Ad9066121B082c45`](https://explorer-studio.genlayer.com/address/0x8C2C70F47147274F1694A6E8Ad9066121B082c45)
+- **Deployer**: `0xb704b624ae5f776b3a3fa7496adcda4db4dcab56` (`9ytshade_Deployer`)
+- **Deployment Transaction**: `0xa00b36f50192e2878fce9cf9b34d5b52ee84f3f6f91fc90105db92b0b819e6fa`
 - **Network**: GenLayer Studionet (Chain ID `61999`)
-- **Source Commit**: `d8da93e857efc151c28def9a72a1abf4df180d9e`
-- **Contract Blob Hash**: `958efc28f75c7333b2140483ee1bb704e0e34085`
+- **Contract Version**: `1.0.1`
 
 ---
 
@@ -71,25 +81,29 @@ Traditional oracles (e.g. Chainlink) can only fetch raw JSON numbers or fixed st
 ```text
 PolicyDriftOracle/
 ├── contracts/
-│   └── policy_drift_oracle.py         # Canonical GenLayer Intelligent Contract
+│   └── policy_drift_oracle.py         # Canonical GenLayer Intelligent Contract (v1.0.1)
 ├── docs/
 │   ├── CONSENSUS.md                   # Detailed consensus & equivalence boundaries
 │   ├── SECURITY.md                    # SSRF defense, prompt injection mitigations
 │   ├── INTEGRATION.md                 # Downstream Solidity & GenLayer guides
 │   └── DEPLOYMENT.md                  # Studionet proof and transaction log
+├── fixtures/
+│   ├── sample_policy.md               # Live baseline fixture on GitHub
+│   └── drifted_policy.md              # Live drifted policy fixture
 ├── scripts/
-│   └── preflight.py                   # AST, schema, and security linter
+│   ├── preflight.py                   # AST, schema, and security linter (20 checks)
+│   └── deploy_studionet.py            # Deployment automation script
 ├── tests/
 │   ├── conftest.py                    # Direct Mode environment patch & fixtures
 │   ├── direct/
-│   │   └── test_policy_drift_oracle.py# 14 Direct Mode comprehensive unit tests
+│   │   └── test_policy_drift_oracle.py# 16 Direct Mode comprehensive unit tests
 │   └── integration/
 │       └── test_policy_drift_oracle_studionet.py # 5 live Studionet on-chain tests
 ├── DECISION.md                        # Design rationale & primitive selection
 ├── requirements.txt                   # Production dependencies
 ├── requirements-test.txt              # Test dependencies
 ├── LICENSE                            # MIT License
-└── SUBMISSION.md                      # Ecosystem submission form summary
+└── SUBMISSION.md                      # Ecosystem submission & resubmission narrative
 ```
 
 ---
@@ -99,19 +113,19 @@ PolicyDriftOracle/
 ### 1. Run Preflight Linter
 ```powershell
 python scripts/preflight.py
-# Preflight checks passed: 16/16 assertions verified.
+# Preflight checks passed: 20/20 assertions verified.
 ```
 
 ### 2. Run Direct Mode Tests
 ```powershell
 python -m pytest tests/direct/test_policy_drift_oracle.py -v
-# 14 passed in 0.57s
+# 16 passed in 0.77s
 ```
 
 ### 3. Run Live Studionet Integration Tests
 ```powershell
 python -m pytest tests/integration/test_policy_drift_oracle_studionet.py -v
-# 5 passed in 25.97s
+# 5 passed in 42.88s
 ```
 
 ---
@@ -122,11 +136,14 @@ You can query the deployed contract on Studionet using the GenLayer CLI:
 
 ```powershell
 # Query policy record #1
-genlayer call 0x123D9c10743eA27da684e3606C5a232848C948D5 get_policy --args 1
+genlayer call 0x8C2C70F47147274F1694A6E8Ad9066121B082c45 get_policy --args 1
 
 # Query validator consensus audit receipt #1
-genlayer call 0x123D9c10743eA27da684e3606C5a232848C948D5 get_audit --args 1
+genlayer call 0x8C2C70F47147274F1694A6E8Ad9066121B082c45 get_audit --args 1
 
-# Verify fail-closed security gate
-genlayer call 0x123D9c10743eA27da684e3606C5a232848C948D5 is_allowed --args 1 0
+# Query latest verdict for policy #1
+genlayer call 0x8C2C70F47147274F1694A6E8Ad9066121B082c45 latest_verdict --args 1
+
+# Verify fail-closed security gate (returns false due to DRIFTED status)
+genlayer call 0x8C2C70F47147274F1694A6E8Ad9066121B082c45 is_allowed --args 1 0
 ```

@@ -22,7 +22,7 @@ FORBIDDEN_MODULES = {"random", "requests", "urllib.request", "socket"}
 
 def run_checks():
     assertions_passed = 0
-    total_checks = 16
+    total_checks = 20
 
     print("--- Running Preflight Verification for PolicyDriftOracle ---")
 
@@ -110,6 +110,7 @@ def run_checks():
         "is_fresh",
         "get_policy_count",
         "get_audit_count",
+        "validate_equivalence",
     }
     for v in expected_views:
         assert v in public_views, f"Missing public view method: {v}"
@@ -128,7 +129,7 @@ def run_checks():
     assert found_run_nondet, "check_drift must utilize run_nondet_unsafe for multi-validator consensus"
     assertions_passed += 1
 
-    # Check 9: Required verdict constants present in contract
+    # Check 9: Required verdict and canonical severity constants present in contract
     const_targets = set()
     for item in cnode.body:
         if isinstance(item, ast.Assign):
@@ -143,6 +144,14 @@ def run_checks():
     assert "VERDICT_UNAVAILABLE" in const_targets
     assertions_passed += 1
     assert "STATUS_DRIFTED" in const_targets
+    assertions_passed += 1
+    assert "SEVERITY_STABLE" in const_targets
+    assertions_passed += 1
+    assert "SEVERITY_MINOR_COMPATIBLE" in const_targets
+    assertions_passed += 1
+    assert "SEVERITY_MATERIAL_BREAKING" in const_targets
+    assertions_passed += 1
+    assert "SEVERITY_UNAVAILABLE" in const_targets
     assertions_passed += 1
 
     print(f"Preflight checks passed: {assertions_passed}/{total_checks} assertions verified.")

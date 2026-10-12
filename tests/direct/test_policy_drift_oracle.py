@@ -332,7 +332,7 @@ def test_audit_material_drift_triggers_fail_closed_status(direct_vm, direct_depl
     direct_vm.mock_llm(
         r"adjudicating whether a live online policy has experienced material semantic drift",
         (
-            '{"verdict": "MATERIAL_BREAKING", "severity": 8, '
+            '{"verdict": "MATERIAL_BREAKING", "severity": 7, '
             '"affected_clauses": ["Clause 4.1 (Uptime dropped to 95%)", "Clause 5.2 (Rate limit slashed 10x)"], '
             '"reasoning": "Critical obligations severely degraded without agreed notice period."}'
         ),
@@ -341,7 +341,7 @@ def test_audit_material_drift_triggers_fail_closed_status(direct_vm, direct_depl
     result = contract.check_drift(policy_id)
 
     assert result["verdict"] == "MATERIAL_BREAKING"
-    assert result["severity_score"] == 8
+    assert result["severity_score"] == 7
     assert result["is_material_drift"] is True
 
     # Policy status is DRIFTED
@@ -468,4 +468,94 @@ def test_nonexistent_policy_and_audit_revert(direct_deploy):
 
     with pytest.raises(Exception, match="Audit receipt not found"):
         contract.get_audit(999)
+
+
+# ==============================================================================
+# 4. EQUIVALENCE PRINCIPLE & SEVERITY THRESHOLD SAFETY TESTS
+# ==============================================================================
+
+
+def test_equivalence_principle_exact_severity_and_canonical_buckets(direct_deploy):
+    """Verifies that validator consensus strictly binds canonical severity and prevents
+
+    validator-compatible proposals from crossing downstream authorization boundaries.
+    Directly addresses steward rejection reason:
+    'The validator allows severity scores to differ by one, but the stored severity
+    directly controls the is_allowed authorization threshold. This lets two
+    validator-compatible scores produce opposite allow/deny results.'
+    """
+    import json
+
+    contract = deploy_contract(direct_deploy)
+
+    # 1. Matching canonical buckets MUST pass
+    stable_canon = json.dumps({"verdict": "STABLE", "severity": 0, "reasoning": "Unchanged"})
+    assert contract.validate_equivalence(stable_canon, stable_canon) is True
+
+    minor_canon = json.dumps({"verdict": "MINOR_COMPATIBLE", "severity": 2, "reasoning": "Format update"})
+    assert contract.validate_equivalence(minor_canon, minor_canon) is True
+
+    breaking_canon = json.dumps({"verdict": "MATERIAL_BREAKING", "severity": 7, "reasoning": "SLA violated"})
+    assert contract.validate_equivalence(breaking_canon, breaking_canon) is True
+
+    unavailable_canon = json.dumps({"verdict": "UNAVAILABLE", "severity": 10, "reasoning": "404 Not Found"})
+    assert contract.validate_equivalence(unavailable_canon, unavailable_canon) is True
+
+    # 2. Strict rejection of +/- 1 severity differences (preventing opposite allow/deny results)
+    # Scenario: Leader reports severity 2, Validator computes severity 3
+    # PREVIOUSLY PASSED (|2 - 3| <= 1). MUST NOW BE STRICTLY REJECTED.
+    leader_sev2 = json.dumps({"verdict": "MINOR_COMPATIBLE", "severity": 2, "reasoning": "Minor"})
+    val_sev3 = json.dumps({"verdict": "MINOR_COMPATIBLE", "severity": 3, "reasoning": "Minor"})
+    assert contract.validate_equivalence(leader_sev2, val_sev3) is False
+    assert contract.validate_equivalence(val_sev3, leader_sev2) is False
+
+    # Scenario: Leader reports severity 0, Validator computes severity 1
+    leader_sev0 = json.dumps({"verdict": "STABLE", "severity": 0, "reasoning": "Stable"})
+    val_sev1 = json.dumps({"verdict": "STABLE", "severity": 1, "reasoning": "Stable"})
+    assert contract.validate_equivalence(leader_sev0, val_sev1) is False
+
+    # Scenario: Leader reports severity 7, Validator computes severity 8
+    leader_sev7 = json.dumps({"verdict": "MATERIAL_BREAKING", "severity": 7, "reasoning": "Breaking"})
+    val_sev8 = json.dumps({"verdict": "MATERIAL_BREAKING", "severity": 8, "reasoning": "Breaking"})
+    assert contract.validate_equivalence(leader_sev7, val_sev8) is False
+
+    # 3. Strict rejection of non-canonical discrete severity buckets even if identical
+    # e.g., both say MINOR_COMPATIBLE with severity 3 (canonical bucket is strictly 2)
+    val_both_sev3 = json.dumps({"verdict": "MINOR_COMPATIBLE", "severity": 3, "reasoning": "Minor"})
+    assert contract.validate_equivalence(val_both_sev3, val_both_sev3) is False
+
+    val_both_sev1 = json.dumps({"verdict": "STABLE", "severity": 1, "reasoning": "Stable"})
+    assert contract.validate_equivalence(val_both_sev1, val_both_sev1) is False
+
+    # 4. Strict rejection of verdict mismatches
+    assert contract.validate_equivalence(stable_canon, minor_canon) is False
+    assert contract.validate_equivalence(stable_canon, breaking_canon) is False
+    assert contract.validate_equivalence(breaking_canon, unavailable_canon) is False
+
+    # 5. Strict rejection of malformed or corrupted JSON
+    assert contract.validate_equivalence("not-json", stable_canon) is False
+    assert contract.validate_equivalence(stable_canon, "{malformed:}") is False
+
+
+def test_downstream_authorization_threshold_safety(direct_vm, direct_deploy, direct_alice):
+    """Verifies that stored canonical severities (0, 2, 7, 10) provide discrete, deterministic
+
+    authorization gates through is_allowed without fuzzy boundary crossing.
+    """
+    contract = deploy_contract(direct_deploy)
+    policy_id = register_sample_policy(direct_vm, contract, owner=direct_alice)
+
+    # Audit 1: STABLE policy (canonical severity 0)
+    direct_vm.mock_web(r"acme\.example\.com/.*", {"status": 200, "body": "<html>Terms intact</html>"})
+    direct_vm.mock_llm(
+        r"adjudicating whether a live online policy has experienced material semantic drift",
+        '{"verdict": "STABLE", "severity": 0, "affected_clauses": [], "reasoning": "Terms intact"}',
+    )
+    contract.check_drift(policy_id)
+
+    # With canonical severity 0:
+    assert contract.is_allowed(policy_id, max_acceptable_severity=0) is True
+    assert contract.is_allowed(policy_id, max_acceptable_severity=1) is True
+    assert contract.is_allowed(policy_id, max_acceptable_severity=2) is True
+
 

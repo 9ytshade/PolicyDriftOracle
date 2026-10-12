@@ -1,7 +1,7 @@
-"""Studionet Integration Tests for PolicyDriftOracle v1.0.0.
+"""Studionet Integration Tests for PolicyDriftOracle v1.0.1.
 
 Verifies canonical deployment and on-chain state on GenLayer Studionet (Chain ID 61999).
-Canonical Contract Address: 0x123D9c10743eA27da684e3606C5a232848C948D5
+Canonical Contract Address: 0x8C2C70F47147274F1694A6E8Ad9066121B082c45
 Deployer Address: 0xb704b624ae5f776b3a3fa7496adcda4db4dcab56
 """
 
@@ -11,7 +11,7 @@ import json
 import re
 import pytest
 
-CANONICAL_ADDRESS = "0x123D9c10743eA27da684e3606C5a232848C948D5"
+CANONICAL_ADDRESS = "0x8C2C70F47147274F1694A6E8Ad9066121B082c45"
 RPC_URL = "https://studio.genlayer.com/api"
 
 
@@ -43,15 +43,15 @@ def genlayer_call(method: str, *args):
     cmd = ["genlayer.cmd", "call", CANONICAL_ADDRESS, method]
     if args:
         cmd.extend(["--args"] + [str(a) for a in args])
-    
+
     res = subprocess.run(cmd, capture_output=True, text=True, shell=True)
     if res.returncode != 0:
         raise RuntimeError(f"genlayer call failed: {res.stderr}\n{res.stdout}")
-    
+
     match = re.search(r"Result:\s*\n(.*?)(?:\n\n√|\Z)", res.stdout, re.DOTALL)
     if not match:
         raise ValueError(f"Could not parse result from: {res.stdout}")
-    
+
     raw = match.group(1).strip()
     if raw == "true":
         return True
@@ -59,14 +59,14 @@ def genlayer_call(method: str, *args):
         return False
     if raw.isdigit():
         return int(raw)
-    
+
     # If the output is a JS object representation, parse it into a dict
     if raw.startswith("{") and raw.endswith("}"):
         node_script = "const obj = eval('(' + process.argv[1] + ')'); console.log(JSON.stringify(obj));"
         node_res = subprocess.run(["node", "-e", node_script, raw], capture_output=True, text=True)
         if node_res.returncode == 0:
             return json.loads(node_res.stdout)
-    
+
     return raw
 
 
@@ -89,22 +89,23 @@ def test_canonical_contract_schema_on_studionet():
         "is_fresh",
         "get_policy_count",
         "get_audit_count",
+        "validate_equivalence",
     ]
     for m in expected_methods:
         assert m in methods, f"Missing method {m} in deployed Studionet schema"
 
 
 def test_studionet_policy_state_and_spec_version():
-    """Verify that policy #1 exists on Studionet and reflects spec_version 2."""
+    """Verify that policy #1 exists on Studionet and reflects valid on-chain state."""
     policy = genlayer_call("get_policy", 1)
     assert isinstance(policy, dict), f"Expected dict for policy, got {type(policy)}"
     assert policy["id"] == 1
-    assert policy["spec_version"] == 2
+    assert policy["spec_version"] == 1
     assert policy["owner"].lower() == "0xb704b624ae5f776b3a3fa7496adcda4db4dcab56".lower()
     assert policy["title"] == "Acme Cloud RPC Service Level Agreement"
     assert policy["active"] is True
     assert policy["total_audits"] == 1
-    assert policy["status"] == "STABLE"
+    assert policy["status"] == "DRIFTED"
 
 
 def test_studionet_audit_receipt_consensus_evidence():
@@ -114,17 +115,20 @@ def test_studionet_audit_receipt_consensus_evidence():
     assert audit["id"] == 1
     assert audit["policy_id"] == 1
     assert audit["spec_version"] == 1
-    assert audit["verdict"] == "STABLE"
-    assert audit["severity_score"] == 0
-    assert audit["is_material_drift"] is False
+    assert audit["verdict"] == "MATERIAL_BREAKING"
+    assert audit["severity_score"] == 7
+    assert audit["is_material_drift"] is True
     assert audit["evidence_status_code"] == 200
     assert len(audit["reasoning"]) > 50, "Validator reasoning must be substantive"
 
 
-def test_studionet_security_gate_invalidates_stale_audit():
-    """Verify that is_allowed(1, 0) returns False because spec_version was updated to 2."""
-    allowed = genlayer_call("is_allowed", 1, 0)
-    assert allowed is False, "is_allowed must fail closed when spec_version is bumped"
+def test_studionet_security_gate_fail_closed_on_drifted_policy():
+    """Verify that is_allowed(1, 0) returns False because policy has drifted."""
+    allowed_strict = genlayer_call("is_allowed", 1, 0)
+    assert allowed_strict is False, "is_allowed must fail closed when policy is DRIFTED"
+
+    allowed_tolerant = genlayer_call("is_allowed", 1, 7)
+    assert allowed_tolerant is False, "is_allowed must fail closed for DRIFTED policies regardless of severity parameter"
 
 
 def test_studionet_counts_consistency():
